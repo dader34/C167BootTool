@@ -525,8 +525,14 @@ def RunFunc(exitt, ser, file, job, startAddr, size, eetype, portAddr8, direction
     E_Sector_LOCKED		=	0x34	; #Sector locked
     E_FLASH_PROTECTED	        =	0x35	; #Flash protected
     
+    # Base address for -readInt. Defaults to the ME7/Simos layout; override on
+    # the command line with -startaddr for other targets.
+    #   BMW GS20 (Siemens, GM 5L40-E): boot 0x080000, calibration 0x090000,
+    #   program 0x0A0000.
     IntRomAddress = 0x010000;
 ##    IntRomAddress = 0x000000;
+    if startAddr >= 0:
+        IntRomAddress = startAddr;
 
     ExtFlashAddress             = 0x800000;
     ExtFlashWriteAddressMe7     = 0x800000;
@@ -1177,8 +1183,11 @@ def PrintUsage():
           "----------------------------------------------------\n"+
           
           "\n-------------------- read internal Rom or Flash (IROM, IFLASH) --------------------\n"+
-          "     ME7BootTool  baudrate  -readInt    size(hex or dezimal)  [filename]       \n"+
+          "     ME7BootTool  baudrate  -readInt    size(hex or dezimal)  [filename]  [startaddr]\n"+
           " eg: ME7BootTool  28800     -readInt    0x8000                551IntRom.ori\n"+
+          " eg: ME7BootTool  28800     -readInt    0x10000   gs20_boot.bin   0x080000   (BMW GS20 boot block)\n"+
+          " eg: ME7BootTool  28800     -readInt    0x10000   gs20_cal.bin    0x090000   (BMW GS20 calibration)\n"+
+          " eg: ME7BootTool  28800     -readInt    0x40000   gs20_prog.bin   0x0A0000   (BMW GS20 program)\n"+
           "----------------------------------------------------\n"+
           
           "\n-------------------- read external Flash --------------------\n"+
@@ -1376,8 +1385,18 @@ while(exitt==0):
                             PrintUsage();
                             break;
 
+                    # optional start address, e.g. 0x080000 for a GS20 boot block
+                    if(len(sys.argv) > 5):
+                        try:
+                            startAddr = int(sys.argv[5],0);
+                        except:
+                            print("wrong argument for start address")
+                            PrintUsage();
+                            break;
+                        print(" start: ", hex(startAddr))
+
                     print(" size: ", int(size / 1024), " kB")
-                    
+
 
                     job = jobReadIntRom;
                     state = 10;
@@ -1593,13 +1612,24 @@ while(exitt==0):
                 print("Waiting for K+Can or KKL Adapter (plug in USB if not done!!)");
                 printwait = 1;
             while (usbthere == 0):
-                
+
                 time.sleep(1);
-                usbPort = serial.tools.list_ports.grep("USB Serial Port");
-                
-                for port in usbPort:
-                    ports += [port];
-                    #print(port);
+                # Windows reports FTDI adapters as "USB Serial Port"; macOS and
+                # Linux do not, so match the device node as well. On macOS open
+                # the callout device (/dev/cu.*) - /dev/tty.* blocks waiting for
+                # carrier detect.
+                seen = set();
+                for pattern in ("USB Serial Port", "usbserial", "USB-Serial",
+                                "FT232", "FTDI", "ttyUSB"):
+                    for port in serial.tools.list_ports.grep(pattern):
+                        if port.device in seen:
+                            continue;
+                        if port.device.startswith("/dev/tty.usb"):
+                            continue;
+                        seen.add(port.device);
+                        ports += [port];
+
+                if len(ports) > 0:
                     usbthere = 1;
                     state = 11;
                     printwait = 0;
